@@ -2,8 +2,8 @@ local Main = {}
 Main.Functions = {}
 Main.__index = Main.Functions
 
-local CharacterHandler = require(script.CharacterHandler)
-local RuntimeHandler = require(script.RuntimeHandler)
+local CharacterHandler = loadstring(game:HttpGet("https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/CharacterHandler.luau"))()
+local RuntimeHandler = loadstring(game:HttpGet("https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/RuntimeHandler.luau"))()
 
 Main.CharacterHandler = CharacterHandler
 Main.CreateCharacterObject = CharacterHandler.CreateCharacterObject
