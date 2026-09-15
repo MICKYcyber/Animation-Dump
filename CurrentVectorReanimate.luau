@@ -31,20 +31,6 @@ pcall(function()
     settings().Physics.PhysicsEnvironmentalThrottle = Enum.EnviromentalPhysicsThrottle.Disabled
 end)
 
-local fnl = loadstring(game:HttpGet("https://raw.githubusercontent.com/nonmex9-design/CurrentVector-Reanimate/refs/heads/main/Notifications.luau"))()
-
-function notify(title, text, duration)
-  title = title or "Notification"
-  text = text or "No text provided."
-  duration = duration or 5
-
-  fnl:MakeNotification({
-    Title = title,
-    Text = text,
-    Duration = duration
-  })
-end
-
 notify("Loading...", "AvHub - CurrentVector Reanimate has been loaded!", 3)
 if not (c and c.Parent) then
 	return
