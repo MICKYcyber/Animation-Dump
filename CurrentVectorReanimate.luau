@@ -31,7 +31,6 @@ pcall(function()
     settings().Physics.PhysicsEnvironmentalThrottle = Enum.EnviromentalPhysicsThrottle.Disabled
 end)
 
-notify("Loading...", "AvHub - CurrentVector Reanimate has been loaded!", 3)
 if not (c and c.Parent) then
 	return
 end
