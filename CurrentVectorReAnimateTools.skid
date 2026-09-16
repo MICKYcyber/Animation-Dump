@@ -305,27 +305,6 @@ model.Destroying:Connect(function()
 	model = nil
 end)
 
-for i, v in pairs(c:GetChildren()) do
-	if v ~= model then
-		if addtools and v:IsA("Tool") then
-	for i1, v1 in pairs(v:GetDescendants()) do
-		if v1 and v1.Parent and v1:IsA("BasePart") then
-			local att = Instance.new("Attachment", v1)
-			local lv = Instance.new("LinearVelocity", v1)
-
-			lv.Attachment0 = att
-			lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-			lv.VectorVelocity = Vector3.zero
-			lv.MaxForce = 1000
-			lv.RelativeTo = Enum.ActuatorRelativeTo.World
-			lv.Name = "lv_" .. v.Name
-		end
-	end
-end
-		v.Parent = model
-	end
-end
-
 if breakjoints then
 	model:BreakJoints()
 else
