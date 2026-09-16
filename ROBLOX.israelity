@@ -1,0 +1,179 @@
+--[[
+	Animation Loader - Simple Setup Tool
+	
+	Handles the annoying setup stuff:
+	- Loading reanimate script
+	- Loading animation module
+	- Downloading/caching .rbxm files
+	- Loading animations from .rbxm
+	
+	You handle the rest (movement, emotes, keybinds, etc.)
+	
+	USAGE:
+	local AnimLoader = loadstring(game:HttpGet("YOUR_URL/AnimationLoader.lua"))()
+	
+	-- Load a single animation
+	local myAnim = AnimLoader:LoadAnimation("https://github.com/.../Anims.rbxm", "AnimationName")
+	myAnim:Play()
+	
+	-- Load all animations from a .rbxm file URL
+	local anims = AnimLoader:LoadFolder("https://github.com/.../Anims.rbxm")
+	anims.Idle:Play()
+	anims.Walk:Play()
+	
+	-- Load animations from a Roblox folder instance
+	local folder = game.ReplicatedStorage.Animations
+	local anims = AnimLoader:LoadAnimationFolder(folder)
+	anims.Idle:Play()
+]]
+if not getgenv().ReAnimSettings or getgenv().ReAnimSettings == "" then
+    getgenv().ReAnimSettings = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/CurrentVectorReanimate.luau"
+end
+
+local url = getgenv().ReAnimSettings
+local AnimationLoader = {}
+AnimationLoader.__index = AnimationLoader
+
+-- Services
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+
+-- Hardcoded URLs (no more passing these around)
+local REANIMATE_URL = url
+local ANIMMODULE_URL = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/AnimModule.luau"
+
+local AnimModule = nil
+local CharacterObject = nil
+local Initialized = false
+
+-- Initialize the system (run reanimate + load anim module)
+local function Initialize(waitTime)
+	if Initialized then return end
+	
+	waitTime = waitTime or 7
+	
+	loadstring(game:HttpGet(REANIMATE_URL))()
+	wait(waitTime)
+	
+	AnimModule = loadstring(game:HttpGet(ANIMMODULE_URL))()
+	
+	local character = Players.LocalPlayer.Character or Players.LocalPlayer.CharacterAdded:Wait()
+	local humanoid = character:WaitForChild("Humanoid")
+	
+	-- Disable default animate
+	local animate = character:FindFirstChild("Animate")
+	if animate then
+		animate.Disabled = true
+	end
+	
+	-- Stop all animations
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, track in animator:GetPlayingAnimationTracks() do
+			track:Stop(0)
+		end
+	end
+	
+	CharacterObject = AnimModule:CreateCharacterObject(character)
+	
+	Initialized = true
+end
+
+-- Download and cache .rbxm file
+local function DownloadFile(url)
+	local filename = "Anim_" .. HttpService:GenerateGUID(false):sub(1, 8) .. ".rbxm"
+	
+	if not isfile(filename) then
+		writefile(filename, game:HttpGet(url))
+	end
+	
+	return filename
+end
+
+-- Get animation from imported objects
+local function FindAnimation(root, name)
+	if root.Name == name then
+		return root
+	end
+	
+	local anim = root:FindFirstChild(name, true)
+	if anim then
+		return anim
+	end
+	
+	return nil
+end
+
+-- Load a single animation
+function AnimationLoader:LoadAnimation(fileUrl, animName, waitTime, priority)
+	Initialize(waitTime)
+	
+	local filename = DownloadFile(fileUrl)
+	local objects = game:GetObjects(getcustomasset(filename))
+	
+	if #objects == 0 then
+		return nil
+	end
+	
+	local root = objects[1]
+	local animObj = FindAnimation(root, animName)
+	
+	if not animObj then
+		return nil
+	end
+	
+	local loadedAnim = AnimModule:LoadAnimation(CharacterObject, animObj)
+	
+	if priority then
+		loadedAnim.Priority = priority
+	end
+	
+	return loadedAnim
+end
+
+-- Load all animations from a folder/file
+function AnimationLoader:LoadFolder(fileUrl, waitTime, priority)
+	Initialize(waitTime)
+	
+	local filename = DownloadFile(fileUrl)
+	local objects = game:GetObjects(getcustomasset(filename))
+	
+	if #objects == 0 then
+		return {}
+	end
+	
+	local root = objects[1]
+	local anims = {}
+	
+	-- Load all children as animations
+	for _, child in ipairs(root:GetDescendants()) do
+		if child:IsA("KeyframeSequence") or child.Name ~= root.Name then
+			local success, loadedAnim = pcall(function()
+				return AnimModule:LoadAnimation(CharacterObject, child)
+			end)
+			
+			if success then
+				if priority then
+					loadedAnim.Priority = priority
+				end
+				anims[child.Name] = loadedAnim
+			end
+		end
+	end
+	
+	return anims
+end
+
+-- Get the character object (for advanced usage)
+function AnimationLoader:GetCharacter(waitTime)
+	Initialize(waitTime)
+	return CharacterObject
+end
+
+-- Get the animation module (for advanced usage)
+function AnimationLoader:GetModule(waitTime)
+	Initialize(waitTime)
+	return AnimModule
+end
+
+return AnimationLoader
