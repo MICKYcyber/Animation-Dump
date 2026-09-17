@@ -31,10 +31,6 @@ pcall(function()
     settings().Physics.PhysicsEnvironmentalThrottle = Enum.EnviromentalPhysicsThrottle.Disabled
 end)
 
-if not (c and c.Parent) then
-	return
-end
-
 c.Destroying:Connect(function()
 	c = nil
 end)
