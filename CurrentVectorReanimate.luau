@@ -325,34 +325,51 @@ end
 if breakjoints then
 	model:BreakJoints()
 else
-	if head and torso then
-		for i, v in pairs(model:GetDescendants()) do
-			if v:IsA("Weld") or v:IsA("Snap") or v:IsA("Glue") or v:IsA("Motor") or v:IsA("Motor6D") then
-				local save = false
-				if (v.Part0 == torso) and (v.Part1 == head) then
-					save = true
-				end
-				if (v.Part0 == head) and (v.Part1 == torso) then
-					save = true
-				end
-				if save then
-					if hedafterneck then
-						hedafterneck = v
+if head and torso then
+	local headOffset = torso.CFrame:ToObjectSpace(head.CFrame)
+
+	-- Destroy ALL original body joints, including the Neck
+	for _, v in pairs(model:GetDescendants()) do
+		if v:IsA("Weld")
+			or v:IsA("Snap")
+			or v:IsA("Glue")
+			or v:IsA("Motor")
+			or v:IsA("Motor6D") then
+			v:Destroy()
+		end
+	end
+
+	-- Recreate ONLY the head/torso connection
+	local headWeld = Instance.new("Weld")
+	headWeld.Name = "ReanimateHeadWeld"
+	headWeld.Part0 = torso
+	headWeld.Part1 = head
+	headWeld.C0 = headOffset
+	headWeld.C1 = CFrame.identity
+	headWeld.Parent = torso
+
+	hedafterneck = headWeld
+end
+	if method == 3 then
+	spawn(function()
+		task.wait(loadtime)
+
+		if model then
+			for _, v in pairs(model:GetDescendants()) do
+				if v:IsA("Weld")
+					or v:IsA("Snap")
+					or v:IsA("Glue")
+					or v:IsA("Motor")
+					or v:IsA("Motor6D") then
+
+					if v.Name ~= "ReanimateHeadWeld" then
+						v:Destroy()
 					end
-				else
-					v:Destroy()
 				end
 			end
 		end
-	end
-	if method == 3 then
-		spawn(function()
-			task.wait(loadtime)
-			if model then
-				model:BreakJoints()
-			end
-		end)
-	end
+	end)
+end
 end
 
 cl.Parent = c
