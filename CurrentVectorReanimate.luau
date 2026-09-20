@@ -519,22 +519,3 @@ spawn(function()
 	end
 	sg:SetCore("ResetButtonCallback", true)
 end)
-
-local FLINGH = nil
-pcall(function()
-	local rootPart = model:FindFirstChild("HumanoidRootPart")
-	if rootPart then
-		FLINGH = rootPart
-		for i, v in pairs(FLINGH:GetDescendants()) do
-			if v:IsA("AlignOrientation") then
-				v.Enabled = false
-			end
-		end
-		FLINGH.Transparency = 0.5
-	end
-end)
-spawn(function()
-	while heartbeat:Wait() and FLINGH and FLINGH.Parent do
-		FLINGH.RotVelocity = Vector3.new(1000, 1000, 1000)
-	end
-end)
