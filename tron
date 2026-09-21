@@ -7,7 +7,6 @@ local RunService = game:GetService("RunService")
 local DEFAULTS = {
 	PositionSpeed = 100,
 	RotationSpeed = 50,
-	MaxForce = nil,
 }
 
 -- Shared state
@@ -32,20 +31,11 @@ local function update(dt)
 		local target = mover.TargetCFrame
 		local cfg = mover.Config
 		
-		-- Position (simple difference * speed formula)
+		-- Position (exactly like the working script)
 		local difference = target.Position - current.Position
-		local vel = difference * (cfg.PositionSpeed or 100)
+		part.AssemblyLinearVelocity = difference * (cfg.PositionSpeed or 100)
 		
-		if cfg.MaxForce then
-			local mag = vel.Magnitude
-			if mag > cfg.MaxForce then
-				vel = vel.Unit * cfg.MaxForce
-			end
-		end
-		
-		part.AssemblyLinearVelocity = vel
-		
-		-- Rotation (axis-angle * speed formula)
+		-- Rotation (exactly like the working script)
 		local rotationDifference = target.Rotation * current.Rotation:Inverse()
 		local axis, angle = rotationDifference:ToAxisAngle()
 		
