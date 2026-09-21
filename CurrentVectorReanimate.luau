@@ -1,6 +1,5 @@
 local StarterGui = game:GetService("StarterGui")
 local noclipAllParts = false
-local flingpart = "HumanoidRootPart"
 local antiragdoll = true
 local newanimate = true
 local discharscripts = true
@@ -8,7 +7,7 @@ local R15toR6 = true
 local hatcollide = false
 local humState16 = true
 local addtools = false
-local hedafterneck = false
+local hedafterneck = true
 local loadtime = game:GetService("Players").RespawnTime + 0.5
 local method = 3
 local alignmode = 1
@@ -31,6 +30,21 @@ pcall(function()
     settings().Physics.PhysicsEnvironmentalThrottle = Enum.EnviromentalPhysicsThrottle.Disabled
 end)
 
+local fnl = loadstring(game:HttpGet("https://raw.githubusercontent.com/nonmex9-design/CurrentVector-Reanimate/refs/heads/main/Notifications.luau"))()
+
+function notify(title, text, duration)
+  title = title or "Notification"
+  text = text or "No text provided."
+  duration = duration or 5
+
+  fnl:MakeNotification({
+    Title = title,
+    Text = text,
+    Duration = duration
+  })
+end
+
+notify("Loading...", "AvHub - CurrentVector Reanimate has been loaded!", 3)
 if not (c and c.Parent) then
 	return
 end
@@ -501,23 +515,4 @@ spawn(function()
 		task.wait()
 	end
 	sg:SetCore("ResetButtonCallback", true)
-end)
-
-local FLINGH = nil
-pcall(function()
-	local rootPart = model:FindFirstChild("HumanoidRootPart")
-	if rootPart then
-		FLINGH = rootPart
-		for i, v in pairs(FLINGH:GetDescendants()) do
-			if v:IsA("AlignOrientation") then
-				v.Enabled = false
-			end
-		end
-		FLINGH.Transparency = 0.5
-	end
-end)
-spawn(function()
-	while heartbeat:Wait() and FLINGH and FLINGH.Parent do
-		FLINGH.RotVelocity = Vector3.new(1000, 1000, 1000)
-	end
 end)
