@@ -1,19 +1,19 @@
--- VelocityMover.lua using AlignPosition and AlignOrientation
--- Much more responsive than velocity-based approach
+-- VelocityMover.lua using AlignPosition/AlignOrientation
+-- Based on the non-flinging velocity code structure
 
 local RunService = game:GetService("RunService")
 
 local DEFAULTS = {
+	Responsiveness = 50,
 	MaxVelocity = math.huge,
 	MaxAngularVelocity = math.huge,
-	Responsiveness = 200,
 }
 
 -- Shared state
 local active = {}
 local connection = nil
 
-local function update()
+local function update(dt)
 	for i = #active, 1, -1 do
 		local mover = active[i]
 		local part = mover.Part
@@ -27,8 +27,10 @@ local function update()
 			continue
 		end
 		
-		-- Update attachment position to follow target
-		mover.Attachment1.WorldCFrame = mover.TargetCFrame
+		local target = mover.TargetCFrame
+		
+		-- Update the attachment to follow target
+		mover.Attachment1.WorldCFrame = target
 	end
 	
 	-- Auto-disconnect when nothing is left
@@ -49,6 +51,7 @@ local VelocityMover = {}
 function VelocityMover.new(part, config)
 	assert(part and part:IsA("BasePart"), "VelocityMover requires a BasePart")
 	
+	-- Manual config merge for compatibility
 	local cfg = {}
 	for k, v in pairs(DEFAULTS) do
 		cfg[k] = v
@@ -76,6 +79,7 @@ function VelocityMover.new(part, config)
 	alignPos.ApplyAtCenterOfMass = true
 	alignPos.Mode = Enum.PositionAlignmentMode.OneAttachment
 	alignPos.RigidityEnabled = false
+	alignPos.Enabled = false
 	alignPos.Parent = part
 	
 	-- Create AlignOrientation
@@ -86,6 +90,7 @@ function VelocityMover.new(part, config)
 	alignOri.Responsiveness = cfg.Responsiveness
 	alignOri.Mode = Enum.OrientationAlignmentMode.OneAttachment
 	alignOri.RigidityEnabled = false
+	alignOri.Enabled = false
 	alignOri.Parent = part
 	
 	local mover = {
@@ -99,6 +104,7 @@ function VelocityMover.new(part, config)
 		AlignOrientation = alignOri,
 	}
 	
+	-- Functional API returned directly
 	local api = {}
 	
 	function api.SetTarget(cf)
@@ -121,14 +127,20 @@ function VelocityMover.new(part, config)
 	function api.Disable()
 		if not mover.Enabled then return end
 		mover.Enabled = false
-		mover.AlignPosition.Enabled = false
-		mover.AlignOrientation.Enabled = false
 		
+		-- Remove from active list
 		for i = #active, 1, -1 do
 			if active[i] == mover then
 				table.remove(active, i)
 				break
 			end
+		end
+		
+		if mover.AlignPosition then
+			mover.AlignPosition.Enabled = false
+		end
+		if mover.AlignOrientation then
+			mover.AlignOrientation.Enabled = false
 		end
 	end
 	
@@ -151,13 +163,21 @@ function VelocityMover.new(part, config)
 	
 	function api.SetConfig(key, value)
 		mover.Config[key] = value
-		if key == "MaxVelocity" then
-			mover.AlignPosition.MaxVelocity = value
+		if key == "Responsiveness" then
+			if mover.AlignPosition then
+				mover.AlignPosition.Responsiveness = value
+			end
+			if mover.AlignOrientation then
+				mover.AlignOrientation.Responsiveness = value
+			end
+		elseif key == "MaxVelocity" then
+			if mover.AlignPosition then
+				mover.AlignPosition.MaxVelocity = value
+			end
 		elseif key == "MaxAngularVelocity" then
-			mover.AlignOrientation.MaxAngularVelocity = value
-		elseif key == "Responsiveness" then
-			mover.AlignPosition.Responsiveness = value
-			mover.AlignOrientation.Responsiveness = value
+			if mover.AlignOrientation then
+				mover.AlignOrientation.MaxAngularVelocity = value
+			end
 		end
 	end
 	
