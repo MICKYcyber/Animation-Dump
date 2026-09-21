@@ -1,12 +1,12 @@
 --[[
 	Animation Loader - Simple Setup Tool
-	
+
 	Handles the annoying setup stuff:
 	- Loading reanimate script (optional, see AnimOnly toggle below)
-	- Loading animation module
+	- Loading AnimModuleVelocity (LinearVelocity-based animation)
 	- Downloading/caching .rbxm files
 	- Loading animations from .rbxm
-	
+
 	You handle the rest (movement, emotes, keybinds, etc.)
 
 	─────────────────────────────────────────────────────
@@ -22,28 +22,34 @@
 	  - You want a faster startup (skips the reanimate wait time)
 	  - The game doesn't require reanimate to function
 	─────────────────────────────────────────────────────
-	
+
 	USAGE:
 	local AnimLoader = loadstring(game:HttpGet("YOUR_URL/AnimationLoader.lua"))()
-	
+
 	-- Load a single animation
 	local myAnim = AnimLoader:LoadAnimation("https://github.com/.../Anims.rbxm", "AnimationName")
 	myAnim:Play()
-	
+
 	-- Load all animations from a .rbxm file URL
 	local anims = AnimLoader:LoadFolder("https://github.com/.../Anims.rbxm")
 	anims.Idle:Play()
 	anims.Walk:Play()
-	
+
 	-- Load animations from a Roblox folder instance
 	local folder = game.ReplicatedStorage.Animations
 	local anims = AnimLoader:LoadAnimationFolder(folder)
 	anims.Idle:Play()
+
+	-- Add an external part (hat, prop, tool handle) to be driven by the animation
+	AnimLoader:AddPart(handle, anchorPart, CFrame.new(0, -0.5, 0))
+
+	-- Remove it
+	AnimLoader:RemovePart("HandleName")
 ]]
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- TOGGLE: set getgenv().AnimLoaderAnimOnly = true to skip reanimate entirely
--- and only load the AnimModule. Defaults to false (full reanimate + AnimModule).
+-- TOGGLE: set getgenv().AnimLoaderAnimOnly = true to skip reanimate entirely.
+-- Defaults to false (full reanimate + AnimModule).
 -- ─────────────────────────────────────────────────────────────────────────────
 local ANIM_ONLY = getgenv().AnimLoaderAnimOnly == true
 
@@ -53,33 +59,28 @@ if not ANIM_ONLY then
 	end
 end
 
-local urlss = not ANIM_ONLY and getgenv().ReAnimSettings or nil
+local REANIMATE_URL  = not ANIM_ONLY and getgenv().ReAnimSettings or nil
+local ANIMMODULE_URL = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/gimick"
+
 local AnimationLoader = {}
 AnimationLoader.__index = AnimationLoader
 
--- Services
-local Players = game:GetService("Players")
+local Players    = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
--- URLs
-local REANIMATE_URL = urlss
-local ANIMMODULE_URL = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/gimick"
+local AnimModule        = nil
+local CharacterObject   = nil
+local Initialized       = false
 
-local AnimModule = nil
-local CharacterObject = nil
-local Initialized = false
-
--- Initialize the system
--- In default mode: runs reanimate then loads AnimModule.
--- In AnimOnly mode (ANIM_ONLY = true): loads AnimModule only, no reanimate.
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Initialize
+-- ─────────────────────────────────────────────────────────────────────────────
 local function Initialize(waitTime)
 	if Initialized then return end
 
 	if ANIM_ONLY then
-		-- AnimModule only — skip reanimate entirely
 		AnimModule = loadstring(game:HttpGet(ANIMMODULE_URL))()
 	else
-		-- Full setup: reanimate + AnimModule
 		waitTime = waitTime or 7
 		loadstring(game:HttpGet(REANIMATE_URL))()
 		wait(waitTime)
@@ -87,15 +88,15 @@ local function Initialize(waitTime)
 	end
 
 	local character = Players.LocalPlayer.Character or Players.LocalPlayer.CharacterAdded:Wait()
-	local humanoid = character:WaitForChild("Humanoid")
+	local humanoid  = character:WaitForChild("Humanoid")
 
-	-- Disable default animate
+	-- Disable default animate script
 	local animate = character:FindFirstChild("Animate")
 	if animate then
 		animate.Disabled = true
 	end
 
-	-- Stop all animations
+	-- Stop any playing tracks
 	local animator = humanoid:FindFirstChildOfClass("Animator")
 	if animator then
 		for _, track in animator:GetPlayingAnimationTracks() do
@@ -103,85 +104,68 @@ local function Initialize(waitTime)
 		end
 	end
 
-	CharacterObject = AnimModule:CreateCharacterObject(character)
+	-- CreateCharacterObject now comes from AnimModuleVelocity
+	CharacterObject = AnimModule.CreateCharacterObject(character)
 
 	Initialized = true
 end
 
--- Download and cache .rbxm file
+-- ─────────────────────────────────────────────────────────────────────────────
+-- File helpers
+-- ─────────────────────────────────────────────────────────────────────────────
 local function DownloadFile(url)
 	local filename = "Anim_" .. HttpService:GenerateGUID(false):sub(1, 8) .. ".rbxm"
-	
 	if not isfile(filename) then
 		writefile(filename, game:HttpGet(url))
 	end
-	
 	return filename
 end
 
--- Get animation from imported objects
 local function FindAnimation(root, name)
-	if root.Name == name then
-		return root
-	end
-	
-	local anim = root:FindFirstChild(name, true)
-	if anim then
-		return anim
-	end
-	
-	return nil
+	if root.Name == name then return root end
+	return root:FindFirstChild(name, true)
 end
 
--- Load a single animation
+-- ─────────────────────────────────────────────────────────────────────────────
+-- LoadAnimation — load a single named animation from a .rbxm URL
+-- ─────────────────────────────────────────────────────────────────────────────
 function AnimationLoader:LoadAnimation(fileUrl, animName, waitTime, priority)
 	Initialize(waitTime)
-	
+
 	local filename = DownloadFile(fileUrl)
-	local objects = game:GetObjects(getcustomasset(filename))
-	
-	if #objects == 0 then
-		return nil
-	end
-	
-	local root = objects[1]
-	local animObj = FindAnimation(root, animName)
-	
-	if not animObj then
-		return nil
-	end
-	
+	local objects  = game:GetObjects(getcustomasset(filename))
+	if #objects == 0 then return nil end
+
+	local animObj = FindAnimation(objects[1], animName)
+	if not animObj then return nil end
+
 	local loadedAnim = AnimModule:LoadAnimation(CharacterObject, animObj)
-	
 	if priority then
 		loadedAnim.Priority = priority
 	end
-	
+
 	return loadedAnim
 end
 
--- Load all animations from a folder/file
+-- ─────────────────────────────────────────────────────────────────────────────
+-- LoadFolder — load all KeyframeSequences from a .rbxm URL
+-- ─────────────────────────────────────────────────────────────────────────────
 function AnimationLoader:LoadFolder(fileUrl, waitTime, priority)
 	Initialize(waitTime)
-	
+
 	local filename = DownloadFile(fileUrl)
-	local objects = game:GetObjects(getcustomasset(filename))
-	
-	if #objects == 0 then
-		return {}
-	end
-	
-	local root = objects[1]
+	local objects  = game:GetObjects(getcustomasset(filename))
+	if #objects == 0 then return {} end
+
+	local root  = objects[1]
 	local anims = {}
-	
-	-- Load all children as animations
+
 	for _, child in ipairs(root:GetDescendants()) do
 		if child:IsA("KeyframeSequence") or child.Name ~= root.Name then
-			local success, loadedAnim = pcall(function()
+			local ok, loadedAnim = pcall(function()
 				return AnimModule:LoadAnimation(CharacterObject, child)
 			end)
-			
-			if success then
+			if ok then
 				if priority then
 					loadedAnim.Priority = priority
 				end
@@ -189,17 +173,68 @@ function AnimationLoader:LoadFolder(fileUrl, waitTime, priority)
 			end
 		end
 	end
-	
+
 	return anims
 end
 
--- Get the character object (for advanced usage)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- LoadAnimationFolder — load all KeyframeSequences from a live Roblox folder
+-- ─────────────────────────────────────────────────────────────────────────────
+function AnimationLoader:LoadAnimationFolder(folder, waitTime, priority)
+	Initialize(waitTime)
+
+	local anims = {}
+	for _, child in ipairs(folder:GetDescendants()) do
+		if child:IsA("KeyframeSequence") then
+			local ok, loadedAnim = pcall(function()
+				return AnimModule:LoadAnimation(CharacterObject, child)
+			end)
+			if ok then
+				if priority then
+					loadedAnim.Priority = priority
+				end
+				anims[child.Name] = loadedAnim
+			end
+		end
+	end
+
+	return anims
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- AddPart — attach an external BasePart to the CharacterObject so it gets
+-- driven by the LinearVelocity system (and optionally animated if the
+-- KeyframeSequence has a matching Pose name).
+--
+--   part    : BasePart to drive (hat handle, tool, prop, etc.)
+--   anchor  : BasePart it should follow (e.g. character's RightHand)
+--   offset  : CFrame offset from anchor in anchor-local space (default identity)
+--   config  : optional { PositionSpeed, RotationSpeed, MaxForce }
+--
+-- Returns the key (part.Name) used to identify it.
+-- ─────────────────────────────────────────────────────────────────────────────
+function AnimationLoader:AddPart(part, anchor, offset, config)
+	Initialize()
+	return AnimModule.AddPart(CharacterObject, part, anchor, offset, config)
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- RemovePart — unregister a part added via AddPart and destroy its mover
+--   key : the string returned by AddPart (or just part.Name)
+-- ─────────────────────────────────────────────────────────────────────────────
+function AnimationLoader:RemovePart(key)
+	if not CharacterObject then return end
+	AnimModule.RemovePart(CharacterObject, key)
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Advanced accessors
+-- ─────────────────────────────────────────────────────────────────────────────
 function AnimationLoader:GetCharacter(waitTime)
 	Initialize(waitTime)
 	return CharacterObject
 end
 
--- Get the animation module (for advanced usage)
 function AnimationLoader:GetModule(waitTime)
 	Initialize(waitTime)
 	return AnimModule
