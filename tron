@@ -1,4 +1,4 @@
--- VelocityMover.lua using BodyVelocity + BodyGyro
+-- VelocityMover.lua using BodyVelocity + BodyGyrossss
 
 local RunService = game:GetService("RunService")
 
@@ -28,13 +28,14 @@ local function update()
 
 		local target = mover.TargetCFrame
 
-		-- Reset velocity every frame to prevent accumulation
-		part.AssemblyLinearVelocity = Vector3.zero
-		part.AssemblyAngularVelocity = Vector3.zero
-
 		-- Update BodyVelocity target using P controller
 		local diff = target.Position - part.Position
-		mover.BodyVelocity.Velocity = diff * 100
+		local vel = diff * 10
+		local mag = vel.Magnitude
+		if mag > 50 then
+			vel = vel.Unit * 50
+		end
+		mover.BodyVelocity.Velocity = vel
 
 		-- Update BodyGyro target
 		mover.BodyGyro.CFrame = target
