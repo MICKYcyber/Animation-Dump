@@ -1,39 +1,41 @@
--- VelocityMover.lua using AlignPosition/AlignOrientation
--- Based on the non-flinging velocity code structure
+-- VelocityMover.lua using BodyVelocity + BodyGyro
 
 local RunService = game:GetService("RunService")
 
 local DEFAULTS = {
-	Responsiveness = 50,
-	MaxVelocity = math.huge,
-	MaxAngularVelocity = math.huge,
+	MaxForce = 1e4,
+	MaxTorque = 1e4,
+	P = 1e4,
+	D = 1e3,
 }
 
--- Shared state
 local active = {}
 local connection = nil
 
-local function update(dt)
+local function update()
 	for i = #active, 1, -1 do
 		local mover = active[i]
 		local part = mover.Part
-		
+
 		if not part or not part.Parent then
 			table.remove(active, i)
 			continue
 		end
-		
+
 		if not mover.Enabled then
 			continue
 		end
-		
+
 		local target = mover.TargetCFrame
-		
-		-- Update the attachment to follow target
-		mover.Attachment1.WorldCFrame = target
+
+		-- Update BodyVelocity target using P controller
+		local diff = target.Position - part.Position
+		mover.BodyVelocity.Velocity = diff * mover.Config.P / 1e4 * 100
+
+		-- Update BodyGyro target
+		mover.BodyGyro.CFrame = target
 	end
-	
-	-- Auto-disconnect when nothing is left
+
 	if #active == 0 and connection then
 		connection:Disconnect()
 		connection = nil
@@ -50,8 +52,7 @@ local VelocityMover = {}
 
 function VelocityMover.new(part, config)
 	assert(part and part:IsA("BasePart"), "VelocityMover requires a BasePart")
-	
-	-- Manual config merge for compatibility
+
 	local cfg = {}
 	for k, v in pairs(DEFAULTS) do
 		cfg[k] = v
@@ -61,130 +62,90 @@ function VelocityMover.new(part, config)
 			cfg[k] = v
 		end
 	end
-	
-	-- Create attachments
-	local att0 = Instance.new("Attachment")
-	att0.Parent = part
-	
-	local att1 = Instance.new("Attachment")
-	att1.Parent = workspace.Terrain
-	att1.WorldCFrame = part.CFrame
-	
-	-- Create AlignPosition
-	local alignPos = Instance.new("AlignPosition")
-	alignPos.Attachment0 = att0
-	alignPos.Attachment1 = att1
-	alignPos.MaxVelocity = cfg.MaxVelocity
-	alignPos.Responsiveness = cfg.Responsiveness
-	alignPos.ApplyAtCenterOfMass = true
-	alignPos.Mode = Enum.PositionAlignmentMode.OneAttachment
-	alignPos.RigidityEnabled = false
-	alignPos.Enabled = false
-	alignPos.Parent = part
-	
-	-- Create AlignOrientation
-	local alignOri = Instance.new("AlignOrientation")
-	alignOri.Attachment0 = att0
-	alignOri.Attachment1 = att1
-	alignOri.MaxAngularVelocity = cfg.MaxAngularVelocity
-	alignOri.Responsiveness = cfg.Responsiveness
-	alignOri.Mode = Enum.OrientationAlignmentMode.OneAttachment
-	alignOri.RigidityEnabled = false
-	alignOri.Enabled = false
-	alignOri.Parent = part
-	
+
+	-- BodyVelocity for position
+	local bv = Instance.new("BodyVelocity")
+	bv.MaxForce = Vector3.new(cfg.MaxForce, cfg.MaxForce, cfg.MaxForce)
+	bv.Velocity = Vector3.zero
+	bv.P = cfg.P
+	bv.Enabled = false
+	bv.Parent = part
+
+	-- BodyGyro for rotation
+	local bg = Instance.new("BodyGyro")
+	bg.MaxTorque = Vector3.new(cfg.MaxTorque, cfg.MaxTorque, cfg.MaxTorque)
+	bg.CFrame = part.CFrame
+	bg.P = cfg.P
+	bg.D = cfg.D
+	bg.Enabled = false
+	bg.Parent = part
+
 	local mover = {
 		Part = part,
 		Config = cfg,
 		TargetCFrame = part.CFrame,
 		Enabled = false,
-		Attachment0 = att0,
-		Attachment1 = att1,
-		AlignPosition = alignPos,
-		AlignOrientation = alignOri,
+		BodyVelocity = bv,
+		BodyGyro = bg,
 	}
-	
-	-- Functional API returned directly
+
 	local api = {}
-	
+
 	function api.SetTarget(cf)
 		mover.TargetCFrame = cf
 	end
-	
+
 	function api.SetTargetPosition(pos)
 		mover.TargetCFrame = CFrame.new(pos) * (mover.TargetCFrame - mover.TargetCFrame.Position)
 	end
-	
+
 	function api.Enable()
 		if mover.Enabled then return end
 		mover.Enabled = true
-		mover.AlignPosition.Enabled = true
-		mover.AlignOrientation.Enabled = true
+		mover.BodyVelocity.Enabled = true
+		mover.BodyGyro.Enabled = true
 		table.insert(active, mover)
 		ensureConnection()
 	end
-	
+
 	function api.Disable()
 		if not mover.Enabled then return end
 		mover.Enabled = false
-		
-		-- Remove from active list
+
 		for i = #active, 1, -1 do
 			if active[i] == mover then
 				table.remove(active, i)
 				break
 			end
 		end
-		
-		if mover.AlignPosition then
-			mover.AlignPosition.Enabled = false
-		end
-		if mover.AlignOrientation then
-			mover.AlignOrientation.Enabled = false
-		end
+
+		mover.BodyVelocity.Enabled = false
+		mover.BodyGyro.Enabled = false
 	end
-	
+
 	function api.Destroy()
 		api.Disable()
-		if mover.AlignPosition then mover.AlignPosition:Destroy() end
-		if mover.AlignOrientation then mover.AlignOrientation:Destroy() end
-		if mover.Attachment0 then mover.Attachment0:Destroy() end
-		if mover.Attachment1 then mover.Attachment1:Destroy() end
+		if mover.BodyVelocity then mover.BodyVelocity:Destroy() end
+		if mover.BodyGyro then mover.BodyGyro:Destroy() end
 		mover.Part = nil
 	end
-	
+
 	function api.IsEnabled()
 		return mover.Enabled
 	end
-	
+
 	function api.GetTarget()
 		return mover.TargetCFrame
 	end
-	
+
 	function api.SetConfig(key, value)
 		mover.Config[key] = value
-		if key == "Responsiveness" then
-			if mover.AlignPosition then
-				mover.AlignPosition.Responsiveness = value
-			end
-			if mover.AlignOrientation then
-				mover.AlignOrientation.Responsiveness = value
-			end
-		elseif key == "MaxVelocity" then
-			if mover.AlignPosition then
-				mover.AlignPosition.MaxVelocity = value
-			end
-		elseif key == "MaxAngularVelocity" then
-			if mover.AlignOrientation then
-				mover.AlignOrientation.MaxAngularVelocity = value
-			end
-		end
 	end
-	
+
 	function api.GetConfig(key)
 		return mover.Config[key]
 	end
-	
+
 	return api
 end
 
