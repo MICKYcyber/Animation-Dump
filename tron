@@ -1,0 +1,165 @@
+-- VelocityMover.lua
+-- Place in ReplicatedStorage or as a ModuleScript
+-- Shared Heartbeat driver + functional API returned from .new()
+
+local RunService = game:GetService("RunService")
+
+local DEFAULTS = {
+	PositionSpeed = 150,  -- Increased from 80 for snappier response
+	RotationSpeed = 80,   -- Increased from 40 for snappier rotation
+	MaxForce = nil,
+	Damping = 0.92,       -- Velocity damping for smoother arrival (0-1, higher = less damping)
+}
+
+-- Shared state
+local active = {}          -- array of mover records
+local connection = nil
+
+local function update(dt)
+	for i = #active, 1, -1 do
+		local mover = active[i]
+		local part = mover.Part
+		
+		if not part or not part.Parent then
+			table.remove(active, i)
+			continue
+		end
+		
+		if not mover.Enabled then
+			continue
+		end
+		
+		local current = part.CFrame
+		local target = mover.TargetCFrame
+		local cfg = mover.Config
+		
+		-- Position (with velocity compensation to eliminate lag)
+		local diff = target.Position - current.Position
+		local currentVel = part.AssemblyLinearVelocity
+		
+		-- Calculate desired velocity with compensation for current velocity
+		local desiredVel = diff * (cfg.PositionSpeed or 150)
+		
+		-- Add velocity correction term to eliminate steady-state error
+		local velocityCorrection = (desiredVel - currentVel) * (cfg.Damping or 0.92)
+		local finalVel = desiredVel + velocityCorrection
+		
+		if cfg.MaxForce then
+			local mag = finalVel.Magnitude
+			if mag > cfg.MaxForce then
+				finalVel = finalVel.Unit * cfg.MaxForce
+			end
+		end
+		
+		part.AssemblyLinearVelocity = finalVel
+		
+		-- Rotation (with angular velocity compensation)
+		local rotDiff = target.Rotation * current.Rotation:Inverse()
+		local axis, angle = rotDiff:ToAxisAngle()
+		
+		if angle > 0.01 then
+			local currentAngVel = part.AssemblyAngularVelocity
+			local desiredAngVel = axis * angle * (cfg.RotationSpeed or 80)
+			
+			-- Apply damping for smoother rotation
+			local angVelCorrection = (desiredAngVel - currentAngVel) * (cfg.Damping or 0.92)
+			part.AssemblyAngularVelocity = desiredAngVel + angVelCorrection
+		else
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+	
+	-- Auto-disconnect when nothing is left
+	if #active == 0 and connection then
+		connection:Disconnect()
+		connection = nil
+	end
+end
+
+local function ensureConnection()
+	if not connection then
+		connection = RunService.Heartbeat:Connect(update)
+	end
+end
+
+local VelocityMover = {}
+
+function VelocityMover.new(part: BasePart, config: {[string]: any}?)
+	assert(part and part:IsA("BasePart"), "VelocityMover requires a BasePart")
+	
+	local cfg = table.clone(DEFAULTS)
+	if config then
+		for k, v in pairs(config) do
+			cfg[k] = v
+		end
+	end
+	
+	local mover = {
+		Part = part,
+		Config = cfg,
+		TargetCFrame = part.CFrame,
+		Enabled = false,
+	}
+	
+	-- Functional API returned directly
+	local api = {}
+	
+	function api.SetTarget(cf: CFrame)
+		mover.TargetCFrame = cf
+	end
+	
+	function api.SetTargetPosition(pos: Vector3)
+		mover.TargetCFrame = CFrame.new(pos) * (mover.TargetCFrame - mover.TargetCFrame.Position)
+	end
+	
+	function api.Enable()
+		if mover.Enabled then return end
+		mover.Enabled = true
+		table.insert(active, mover)
+		ensureConnection()
+	end
+	
+	function api.Disable()
+		if not mover.Enabled then return end
+		mover.Enabled = false
+		
+		-- Remove from active list
+		for i = #active, 1, -1 do
+			if active[i] == mover then
+				table.remove(active, i)
+				break
+			end
+		end
+		
+		if part and part.Parent then
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+	
+	function api.Destroy()
+		api.Disable()
+		mover.Part = nil
+	end
+	
+	function api.IsEnabled(): boolean
+		return mover.Enabled
+	end
+	
+	function api.GetTarget(): CFrame
+		return mover.TargetCFrame
+	end
+	
+	-- Allow runtime config changes
+	function api.SetConfig(key: string, value: any)
+		mover.Config[key] = value
+	end
+	
+	function api.GetConfig(key: string): any
+		return mover.Config[key]
+	end
+	
+	return api
+end
+
+return VelocityMover
