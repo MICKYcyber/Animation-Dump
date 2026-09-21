@@ -5,10 +5,9 @@
 local RunService = game:GetService("RunService")
 
 local DEFAULTS = {
-	PositionSpeed = 150,  -- Increased from 80 for snappier response
-	RotationSpeed = 80,   -- Increased from 40 for snappier rotation
+	PositionSpeed = 100,
+	RotationSpeed = 50,
 	MaxForce = nil,
-	Damping = 0.92,       -- Velocity damping for smoother arrival (0-1, higher = less damping)
 }
 
 -- Shared state
@@ -33,37 +32,25 @@ local function update(dt)
 		local target = mover.TargetCFrame
 		local cfg = mover.Config
 		
-		-- Position (with velocity compensation to eliminate lag)
-		local diff = target.Position - current.Position
-		local currentVel = part.AssemblyLinearVelocity
-		
-		-- Calculate desired velocity with compensation for current velocity
-		local desiredVel = diff * (cfg.PositionSpeed or 150)
-		
-		-- Add velocity correction term to eliminate steady-state error
-		local velocityCorrection = (desiredVel - currentVel) * (cfg.Damping or 0.92)
-		local finalVel = desiredVel + velocityCorrection
+		-- Position (simple difference * speed formula)
+		local difference = target.Position - current.Position
+		local vel = difference * (cfg.PositionSpeed or 100)
 		
 		if cfg.MaxForce then
-			local mag = finalVel.Magnitude
+			local mag = vel.Magnitude
 			if mag > cfg.MaxForce then
-				finalVel = finalVel.Unit * cfg.MaxForce
+				vel = vel.Unit * cfg.MaxForce
 			end
 		end
 		
-		part.AssemblyLinearVelocity = finalVel
+		part.AssemblyLinearVelocity = vel
 		
-		-- Rotation (with angular velocity compensation)
-		local rotDiff = target.Rotation * current.Rotation:Inverse()
-		local axis, angle = rotDiff:ToAxisAngle()
+		-- Rotation (axis-angle * speed formula)
+		local rotationDifference = target.Rotation * current.Rotation:Inverse()
+		local axis, angle = rotationDifference:ToAxisAngle()
 		
 		if angle > 0.01 then
-			local currentAngVel = part.AssemblyAngularVelocity
-			local desiredAngVel = axis * angle * (cfg.RotationSpeed or 80)
-			
-			-- Apply damping for smoother rotation
-			local angVelCorrection = (desiredAngVel - currentAngVel) * (cfg.Damping or 0.92)
-			part.AssemblyAngularVelocity = desiredAngVel + angVelCorrection
+			part.AssemblyAngularVelocity = axis * angle * (cfg.RotationSpeed or 50)
 		else
 			part.AssemblyAngularVelocity = Vector3.zero
 		end
@@ -87,7 +74,11 @@ local VelocityMover = {}
 function VelocityMover.new(part: BasePart, config: {[string]: any}?)
 	assert(part and part:IsA("BasePart"), "VelocityMover requires a BasePart")
 	
-	local cfg = table.clone(DEFAULTS)
+	-- Manual clone for compatibility
+	local cfg = {}
+	for k, v in pairs(DEFAULTS) do
+		cfg[k] = v
+	end
 	if config then
 		for k, v in pairs(config) do
 			cfg[k] = v
