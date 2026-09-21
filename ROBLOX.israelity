@@ -2,12 +2,26 @@
 	Animation Loader - Simple Setup Tool
 	
 	Handles the annoying setup stuff:
-	- Loading reanimate script
+	- Loading reanimate script (optional, see AnimOnly toggle below)
 	- Loading animation module
 	- Downloading/caching .rbxm files
 	- Loading animations from .rbxm
 	
 	You handle the rest (movement, emotes, keybinds, etc.)
+
+	─────────────────────────────────────────────────────
+	TOGGLE — AnimOnly mode (skip reanimate, use AnimModule only)
+	─────────────────────────────────────────────────────
+	Set this BEFORE requiring AnimationLoader to skip the reanimate step:
+
+	    getgenv().AnimLoaderAnimOnly = true   -- AnimModule only, no reanimate
+	    getgenv().AnimLoaderAnimOnly = false  -- default: reanimate + AnimModule
+
+	Use AnimOnly when:
+	  - You don't need netless/reanimate and just want the AnimModule for normal gameplay
+	  - You want a faster startup (skips the reanimate wait time)
+	  - The game doesn't require reanimate to function
+	─────────────────────────────────────────────────────
 	
 	USAGE:
 	local AnimLoader = loadstring(game:HttpGet("YOUR_URL/AnimationLoader.lua"))()
@@ -26,11 +40,20 @@
 	local anims = AnimLoader:LoadAnimationFolder(folder)
 	anims.Idle:Play()
 ]]
-if not getgenv().ReAnimSettings or getgenv().ReAnimSettings == "" then
-    getgenv().ReAnimSettings = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/CurrentVectorReanimate.luau"
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- TOGGLE: set getgenv().AnimLoaderAnimOnly = true to skip reanimate entirely
+-- and only load the AnimModule. Defaults to false (full reanimate + AnimModule).
+-- ─────────────────────────────────────────────────────────────────────────────
+local ANIM_ONLY = getgenv().AnimLoaderAnimOnly == true
+
+if not ANIM_ONLY then
+	if not getgenv().ReAnimSettings or getgenv().ReAnimSettings == "" then
+		getgenv().ReAnimSettings = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/CurrentVectorReanimate.luau"
+	end
 end
 
-local urlss = getgenv().ReAnimSettings
+local urlss = not ANIM_ONLY and getgenv().ReAnimSettings or nil
 local AnimationLoader = {}
 AnimationLoader.__index = AnimationLoader
 
@@ -38,7 +61,7 @@ AnimationLoader.__index = AnimationLoader
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
--- Hardcoded URLs (no more passing these around)
+-- URLs
 local REANIMATE_URL = urlss
 local ANIMMODULE_URL = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/AnimModule.luau"
 
@@ -46,26 +69,32 @@ local AnimModule = nil
 local CharacterObject = nil
 local Initialized = false
 
--- Initialize the system (run reanimate + load anim module)
+-- Initialize the system
+-- In default mode: runs reanimate then loads AnimModule.
+-- In AnimOnly mode (ANIM_ONLY = true): loads AnimModule only, no reanimate.
 local function Initialize(waitTime)
 	if Initialized then return end
-	
-	waitTime = waitTime or 7
-	
-	loadstring(game:HttpGet(REANIMATE_URL))()
-	wait(waitTime)
-	
-	AnimModule = loadstring(game:HttpGet(ANIMMODULE_URL))()
-	
+
+	if ANIM_ONLY then
+		-- AnimModule only — skip reanimate entirely
+		AnimModule = loadstring(game:HttpGet(ANIMMODULE_URL))()
+	else
+		-- Full setup: reanimate + AnimModule
+		waitTime = waitTime or 7
+		loadstring(game:HttpGet(REANIMATE_URL))()
+		wait(waitTime)
+		AnimModule = loadstring(game:HttpGet(ANIMMODULE_URL))()
+	end
+
 	local character = Players.LocalPlayer.Character or Players.LocalPlayer.CharacterAdded:Wait()
 	local humanoid = character:WaitForChild("Humanoid")
-	
+
 	-- Disable default animate
 	local animate = character:FindFirstChild("Animate")
 	if animate then
 		animate.Disabled = true
 	end
-	
+
 	-- Stop all animations
 	local animator = humanoid:FindFirstChildOfClass("Animator")
 	if animator then
@@ -73,9 +102,9 @@ local function Initialize(waitTime)
 			track:Stop(0)
 		end
 	end
-	
+
 	CharacterObject = AnimModule:CreateCharacterObject(character)
-	
+
 	Initialized = true
 end
 
