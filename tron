@@ -3,10 +3,10 @@
 local RunService = game:GetService("RunService")
 
 local DEFAULTS = {
-	MaxForce = 1e4,
-	MaxTorque = 1e4,
-	P = 1e4,
-	D = 1e3,
+	MaxForce = 500,
+	MaxTorque = 500,
+	P = 3000,
+	D = 300,
 }
 
 local active = {}
@@ -28,9 +28,13 @@ local function update()
 
 		local target = mover.TargetCFrame
 
+		-- Reset velocity every frame to prevent accumulation
+		part.AssemblyLinearVelocity = Vector3.zero
+		part.AssemblyAngularVelocity = Vector3.zero
+
 		-- Update BodyVelocity target using P controller
 		local diff = target.Position - part.Position
-		mover.BodyVelocity.Velocity = diff * mover.Config.P / 1e4 * 100
+		mover.BodyVelocity.Velocity = diff * 100
 
 		-- Update BodyGyro target
 		mover.BodyGyro.CFrame = target
