@@ -63,7 +63,7 @@ local HttpService = game:GetService("HttpService")
 
 -- URLs
 local REANIMATE_URL = urlss
-local ANIMMODULE_URL = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/AnimModule.luau"
+local ANIMMODULE_URL = "https://raw.githubusercontent.com/MICKYcyber/Animation-Dump/refs/heads/main/gimick"
 
 local AnimModule = nil
 local CharacterObject = nil
