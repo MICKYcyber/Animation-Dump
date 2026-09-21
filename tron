@@ -1,11 +1,12 @@
--- VelocityMover.lua
--- Exact replication of working linear velocity system
+-- VelocityMover.lua using AlignPosition and AlignOrientation
+-- Much more responsive than velocity-based approach
 
 local RunService = game:GetService("RunService")
 
 local DEFAULTS = {
-	PositionSpeed = 100,
-	RotationSpeed = 50,
+	MaxVelocity = math.huge,
+	MaxAngularVelocity = math.huge,
+	Responsiveness = 200,
 }
 
 -- Shared state
@@ -26,17 +27,8 @@ local function update()
 			continue
 		end
 		
-		local target = mover.TargetCFrame
-		local cfg = mover.Config
-		
-		-- Position - EXACTLY like working script
-		local difference = target.Position - part.Position
-		part.AssemblyLinearVelocity = difference * cfg.PositionSpeed
-		
-		-- Rotation - EXACTLY like working script
-		local rotationDifference = target.Rotation * part.CFrame.Rotation:Inverse()
-		local axis, angle = rotationDifference:ToAxisAngle()
-		part.AssemblyAngularVelocity = axis * angle * cfg.RotationSpeed
+		-- Update attachment position to follow target
+		mover.Attachment1.WorldCFrame = mover.TargetCFrame
 	end
 	
 	-- Auto-disconnect when nothing is left
@@ -67,11 +59,44 @@ function VelocityMover.new(part, config)
 		end
 	end
 	
+	-- Create attachments
+	local att0 = Instance.new("Attachment")
+	att0.Parent = part
+	
+	local att1 = Instance.new("Attachment")
+	att1.Parent = workspace.Terrain
+	att1.WorldCFrame = part.CFrame
+	
+	-- Create AlignPosition
+	local alignPos = Instance.new("AlignPosition")
+	alignPos.Attachment0 = att0
+	alignPos.Attachment1 = att1
+	alignPos.MaxVelocity = cfg.MaxVelocity
+	alignPos.Responsiveness = cfg.Responsiveness
+	alignPos.ApplyAtCenterOfMass = true
+	alignPos.Mode = Enum.PositionAlignmentMode.OneAttachment
+	alignPos.RigidityEnabled = false
+	alignPos.Parent = part
+	
+	-- Create AlignOrientation
+	local alignOri = Instance.new("AlignOrientation")
+	alignOri.Attachment0 = att0
+	alignOri.Attachment1 = att1
+	alignOri.MaxAngularVelocity = cfg.MaxAngularVelocity
+	alignOri.Responsiveness = cfg.Responsiveness
+	alignOri.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	alignOri.RigidityEnabled = false
+	alignOri.Parent = part
+	
 	local mover = {
 		Part = part,
 		Config = cfg,
 		TargetCFrame = part.CFrame,
 		Enabled = false,
+		Attachment0 = att0,
+		Attachment1 = att1,
+		AlignPosition = alignPos,
+		AlignOrientation = alignOri,
 	}
 	
 	local api = {}
@@ -87,6 +112,8 @@ function VelocityMover.new(part, config)
 	function api.Enable()
 		if mover.Enabled then return end
 		mover.Enabled = true
+		mover.AlignPosition.Enabled = true
+		mover.AlignOrientation.Enabled = true
 		table.insert(active, mover)
 		ensureConnection()
 	end
@@ -94,6 +121,8 @@ function VelocityMover.new(part, config)
 	function api.Disable()
 		if not mover.Enabled then return end
 		mover.Enabled = false
+		mover.AlignPosition.Enabled = false
+		mover.AlignOrientation.Enabled = false
 		
 		for i = #active, 1, -1 do
 			if active[i] == mover then
@@ -101,15 +130,14 @@ function VelocityMover.new(part, config)
 				break
 			end
 		end
-		
-		if part and part.Parent then
-			part.AssemblyLinearVelocity = Vector3.zero
-			part.AssemblyAngularVelocity = Vector3.zero
-		end
 	end
 	
 	function api.Destroy()
 		api.Disable()
+		if mover.AlignPosition then mover.AlignPosition:Destroy() end
+		if mover.AlignOrientation then mover.AlignOrientation:Destroy() end
+		if mover.Attachment0 then mover.Attachment0:Destroy() end
+		if mover.Attachment1 then mover.Attachment1:Destroy() end
 		mover.Part = nil
 	end
 	
@@ -123,6 +151,14 @@ function VelocityMover.new(part, config)
 	
 	function api.SetConfig(key, value)
 		mover.Config[key] = value
+		if key == "MaxVelocity" then
+			mover.AlignPosition.MaxVelocity = value
+		elseif key == "MaxAngularVelocity" then
+			mover.AlignOrientation.MaxAngularVelocity = value
+		elseif key == "Responsiveness" then
+			mover.AlignPosition.Responsiveness = value
+			mover.AlignOrientation.Responsiveness = value
+		end
 	end
 	
 	function api.GetConfig(key)
