@@ -1,0 +1,403 @@
+-- AnimModuleVelocity.lua
+-- AnimModule re-implementation that drives limbs via LinearVelocity
+-- instead of writing Motor6D.C0 directly.
+-- Each animated limb gets a LinearVelocity mover; poses are applied by
+-- pushing the part to the world CFrame the motor would have produced.
+--
+-- USAGE:
+--   local AnimMod = loadstring(game:HttpGet("YOUR_URL/AnimModuleVelocity.lua"))()
+--   local CharObj  = AnimMod:CreateCharacterObject(character)
+--   local anim     = AnimMod:LoadAnimation(CharObj, keyframeSequence)
+--   anim:Play()
+
+local RunService  = game:GetService("RunService")
+local Velocity    = loadstring(game:HttpGet(
+	"https://raw.githubusercontent.com/GST-Studios/GST-Studios/refs/heads/main/LinearVelocity.luau"
+))()
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- CharacterObject builder
+-- Walks Motor6Ds, stores Part0/Part1 refs, baked C0/C1, and creates a
+-- LinearVelocity mover for every Part1 (the driven limb).
+-- ─────────────────────────────────────────────────────────────────────────────
+local function CreateCharacterObject(character, config)
+	config = config or {}
+	local posSpeed = config.PositionSpeed or 120
+	local rotSpeed = config.RotationSpeed or 60
+	local maxForce = config.MaxForce      or 200
+
+	local Motors    = {}   -- [limbName] = Motor6D
+	local DefaultC0 = {}   -- [limbName] = Motor6D.C0  (rest pose)
+	local DefaultC1 = {}   -- [limbName] = Motor6D.C1
+	local Part0s    = {}   -- [limbName] = Motor6D.Part0
+	local Part1s    = {}   -- [limbName] = Motor6D.Part1  (the part we move)
+	local Movers    = {}   -- [limbName] = LinearVelocity mover api
+
+	for _, desc in ipairs(character:GetDescendants()) do
+		if desc:IsA("Motor6D") and desc.Part0 and desc.Part1 then
+			local name = desc.Part1.Name
+			Motors[name]    = desc
+			DefaultC0[name] = desc.C0
+			DefaultC1[name] = desc.C1
+			Part0s[name]    = desc.Part0
+			Part1s[name]    = desc.Part1
+
+			-- Create a mover on the limb part
+			local mover = Velocity.new(desc.Part1, {
+				PositionSpeed = posSpeed,
+				RotationSpeed = rotSpeed,
+				MaxForce      = maxForce,
+			})
+			mover.SetTarget(desc.Part1.CFrame) -- start at rest pose
+			mover.Enable()
+			Movers[name] = mover
+		end
+	end
+
+	-- Clean up when character is removed
+	character.AncestryChanged:Connect(function()
+		if not character.Parent then
+			for _, mover in pairs(Movers) do
+				pcall(function() mover.Destroy() end)
+			end
+		end
+	end)
+
+	return {
+		Character  = character,
+		Motors     = Motors,
+		DefaultC0  = DefaultC0,
+		DefaultC1  = DefaultC1,
+		Part0s     = Part0s,
+		Part1s     = Part1s,
+		Movers     = Movers,
+		Runtime    = {},   -- [limbName][priority] = {connections}
+	}
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Drive a limb to a pose CFrame.
+-- pose is the lerped keyframe CFrame (same as what AnimModule puts into C0).
+-- World target = Part0.CFrame * C0_default * pose * C1:Inverse()
+-- This matches the Motor6D formula exactly.
+-- ─────────────────────────────────────────────────────────────────────────────
+local function applyPose(charObj, limbName, poseCF)
+	local mover  = charObj.Movers[limbName]
+	local part0  = charObj.Part0s[limbName]
+	local c0     = charObj.DefaultC0[limbName]
+	local c1     = charObj.DefaultC1[limbName]
+	if not (mover and part0) then return end
+
+	local worldTarget = part0.CFrame * c0 * poseCF * c1:Inverse()
+	mover.SetTarget(worldTarget)
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- AddPart — register an external BasePart (prop, hat, tool, etc.) onto a
+-- CharacterObject so it gets driven by the same LinearVelocity system.
+--
+--   charObj  : the CharacterObject from CreateCharacterObject
+--   part     : the BasePart to drive (handle, accessory, etc.)
+--   anchor   : the BasePart it should follow (e.g. character's RightHand)
+--   offset   : CFrame offset from anchor in anchor-local space (default identity)
+--   config   : optional { PositionSpeed, RotationSpeed, MaxForce } override
+--
+-- The part is registered under its .Name as the limb key.
+-- If a KeyframeSequence being played has a Pose with the same name as this
+-- part, that pose will drive it.  Otherwise it simply tracks anchor * offset.
+--
+-- Returns the key string used (part.Name) so you can remove it later with
+-- charObj:RemovePart(key).
+-- ─────────────────────────────────────────────────────────────────────────────
+local function AddPart(charObj, part, anchor, offset, config)
+	assert(part and part:IsA("BasePart"), "AddPart: part must be a BasePart")
+	assert(anchor and anchor:IsA("BasePart"), "AddPart: anchor must be a BasePart")
+
+	config = config or {}
+	local posSpeed = config.PositionSpeed or 120
+	local rotSpeed = config.RotationSpeed or 60
+	local maxForce = config.MaxForce      or 200
+	offset = offset or CFrame.new()
+
+	local key = part.Name
+
+	-- If a mover already exists for this key, destroy it first
+	if charObj.Movers[key] then
+		pcall(function() charObj.Movers[key].Destroy() end)
+	end
+
+	-- Store as a "virtual motor": Part0 = anchor, C0 = offset, C1 = identity
+	-- so the same world-target formula works:  anchor.CFrame * offset * poseCF
+	charObj.Part0s[key]    = anchor
+	charObj.Part1s[key]    = part
+	charObj.DefaultC0[key] = offset
+	charObj.DefaultC1[key] = CFrame.new()   -- identity — no C1 for freeform parts
+	-- No real Motor6D, so leave Motors[key] nil
+
+	local mover = Velocity.new(part, {
+		PositionSpeed = posSpeed,
+		RotationSpeed = rotSpeed,
+		MaxForce      = maxForce,
+	})
+	mover.SetTarget(anchor.CFrame * offset)
+	mover.Enable()
+	charObj.Movers[key] = mover
+
+	return key
+end
+
+-- RemovePart — unregisters a part added via AddPart and destroys its mover.
+local function RemovePart(charObj, key)
+	if charObj.Movers[key] then
+		pcall(function() charObj.Movers[key].Destroy() end)
+		charObj.Movers[key]    = nil
+	end
+	charObj.Part0s[key]    = nil
+	charObj.Part1s[key]    = nil
+	charObj.DefaultC0[key] = nil
+	charObj.DefaultC1[key] = nil
+	charObj.Motors[key]    = nil
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Main module
+-- ─────────────────────────────────────────────────────────────────────────────
+local Main = {}
+Main.Functions = {}
+Main.__index   = Main.Functions
+
+Main.CreateCharacterObject = CreateCharacterObject
+Main.AddPart               = AddPart
+Main.RemovePart            = RemovePart
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- LoadAnimation — identical keyframe parsing to AnimModule
+-- ─────────────────────────────────────────────────────────────────────────────
+function Main:LoadAnimation(charObj, keyframeSequence)
+	local anim = setmetatable({}, Main)
+
+	anim.CharacterObject    = charObj
+	anim.KeyframeSequence   = keyframeSequence
+	anim.Priority           = keyframeSequence.Priority
+	anim.Loop               = keyframeSequence.Loop
+	anim.PlaybackSpeed      = 1
+	anim.Playing            = false
+	anim.BlendTime          = 0.15
+	anim.RuntimePrivate     = {}
+
+	-- Sort keyframes by time
+	local kfsInOrder = keyframeSequence:GetChildren()
+	table.sort(kfsInOrder, function(a, b) return a.Time < b.Time end)
+
+	anim.Keyframes = kfsInOrder
+	anim.Time      = kfsInOrder[#kfsInOrder].Time
+
+	-- Build per-limb keyframe tables (same filter logic as AnimModule)
+	local kfFormat = {}
+	for _, keyframe in ipairs(kfsInOrder) do
+		for _, limbFrame in ipairs(keyframe:GetDescendants()) do
+			if  limbFrame.Name ~= "Null"
+			and limbFrame.Name ~= "HumanoidRootPart"
+			and limbFrame:FindFirstChild("Null") == nil
+			then
+				kfFormat[limbFrame.Name] = kfFormat[limbFrame.Name] or {}
+				table.insert(kfFormat[limbFrame.Name], {
+					Time     = keyframe.Time,
+					Keyframe = limbFrame,
+				})
+			end
+		end
+	end
+
+	anim.KeyframeTable = kfFormat
+	return anim
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Internal: add a per-limb Heartbeat loop (mirrors RuntimeHandler behaviour)
+-- ─────────────────────────────────────────────────────────────────────────────
+function Main.Functions:_addToRuntime(limbName, callback)
+	local elapsed  = 0
+	local repeats  = 0
+	local conn
+
+	conn = RunService.Heartbeat:Connect(function(dt)
+		if not self.Playing then
+			conn:Disconnect()
+			self.RuntimePrivate[limbName] = nil
+			return
+		end
+
+		elapsed += dt * self.PlaybackSpeed
+
+		if elapsed >= self.Time then
+			if self.Loop then
+				repeats  += 1
+				elapsed   = elapsed % self.Time
+			else
+				elapsed = self.Time
+				self.Playing = false
+			end
+		end
+
+		callback(elapsed, repeats, dt)
+	end)
+
+	self.RuntimePrivate[limbName] = conn
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Play
+-- ─────────────────────────────────────────────────────────────────────────────
+function Main.Functions:Play()
+	if self.Playing then return end
+	self.Playing = true
+
+	for limbName, limb in pairs(self.KeyframeTable) do
+		local charObj     = self.CharacterObject
+		local keyCount    = #limb
+		local maxEntry    = limb[keyCount]
+		local blendFrom   = self.BlendFrom and self.BlendFrom[limbName]
+		local blendElapsed = 0
+		local slot        = 1
+		local prevRepeats = 0
+
+		self:_addToRuntime(limbName, function(runtime, repeats, deltaTime)
+			-- At or past the last keyframe — hold final pose
+			if runtime >= maxEntry.Time then
+				applyPose(charObj, limbName, maxEntry.Keyframe.CFrame)
+				return
+			end
+
+			-- Reset slot on new loop repeat
+			if repeats ~= prevRepeats then
+				prevRepeats = repeats
+				slot        = 1
+			end
+
+			-- Advance slot to the bracket that contains `runtime`
+			while slot < keyCount and runtime > limb[slot].Time do
+				slot += 1
+			end
+
+			-- Lerp between [slot-1] and [slot]
+			local prev
+			if slot == 1 then
+				prev = { Time = 0, Keyframe = { CFrame = CFrame.new() } }
+			else
+				prev = limb[slot - 1]
+			end
+
+			local curr    = limb[slot]
+			local span    = curr.Time - prev.Time
+			local alpha   = span > 0 and math.clamp((runtime - prev.Time) / span, 0, 1) or 1
+			local poseCF  = prev.Keyframe.CFrame:Lerp(curr.Keyframe.CFrame, alpha)
+
+			-- Compute world target
+			local c0      = charObj.DefaultC0[limbName]
+			local c1      = charObj.DefaultC1[limbName]
+			local part0   = charObj.Part0s[limbName]
+			local mover   = charObj.Movers[limbName]
+			if not (mover and part0 and c0 and c1) then return end
+
+			local worldTarget = part0.CFrame * c0 * poseCF * c1:Inverse()
+
+			-- Blend-in from previous pose
+			if blendFrom and blendElapsed < self.BlendTime then
+				blendElapsed += deltaTime
+				local t = math.clamp(blendElapsed / self.BlendTime, 0, 1)
+				t = t * t * (3 - 2 * t) -- smoothstep
+				worldTarget = blendFrom:Lerp(worldTarget, t)
+			end
+
+			mover.SetTarget(worldTarget)
+		end)
+	end
+
+	self.BlendFrom = nil
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Stop — blend each limb back to rest pose then reset mover target
+-- ─────────────────────────────────────────────────────────────────────────────
+function Main.Functions:Stop()
+	self.Playing = false -- causes _addToRuntime loops to self-disconnect
+
+	for limbName, conn in pairs(self.RuntimePrivate) do
+		pcall(function() conn:Disconnect() end)
+	end
+	self.RuntimePrivate = {}
+
+	-- Blend each limb back to its rest-pose world CFrame
+	local charObj   = self.CharacterObject
+	local blendTime = self.BlendTime
+
+	for limbName, mover in pairs(charObj.Movers) do
+		local part0 = charObj.Part0s[limbName]
+		local c0    = charObj.DefaultC0[limbName]
+		local c1    = charObj.DefaultC1[limbName]
+		if not (part0 and c0 and c1) then continue end
+
+		local part1      = charObj.Part1s[limbName]
+		local startCF    = part1 and part1.CFrame or mover.GetTarget()
+		local elapsed    = 0
+		local blendConn
+
+		blendConn = RunService.Heartbeat:Connect(function(dt)
+			elapsed += dt
+			local restWorld = part0.CFrame * c0 * c1:Inverse()
+
+			if elapsed >= blendTime then
+				mover.SetTarget(restWorld)
+				blendConn:Disconnect()
+				return
+			end
+
+			local t = math.clamp(elapsed / blendTime, 0, 1)
+			t = t * t * (3 - 2 * t)
+			mover.SetTarget(startCF:Lerp(restWorld, t))
+		end)
+	end
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- SwitchAnimation — crossfade from self into newAnim
+-- ─────────────────────────────────────────────────────────────────────────────
+function Main.Functions:SwitchAnimation(newAnim)
+	if newAnim == self then return newAnim end
+
+	-- Capture current part world CFrames as blend origin
+	local blendFrom = {}
+	for limbName, part1 in pairs(self.CharacterObject.Part1s) do
+		blendFrom[limbName] = part1.CFrame
+	end
+
+	newAnim.BlendFrom = blendFrom
+	newAnim:Play()
+	self:Stop()
+	return newAnim
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Pause / speed / config helpers
+-- ─────────────────────────────────────────────────────────────────────────────
+function Main.Functions:Pause()
+	self.Playing = false
+end
+
+function Main.Functions:SetSpeed(speed)
+	self.PlaybackSpeed = speed
+end
+
+function Main.Functions:SetBlendTime(t)
+	self.BlendTime = t
+end
+
+-- Adjust LinearVelocity config for all movers on this character
+function Main.Functions:SetMoverConfig(key, value)
+	for _, mover in pairs(self.CharacterObject.Movers) do
+		pcall(function() mover.SetConfig(key, value) end)
+	end
+end
+
+return Main
