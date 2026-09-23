@@ -2,7 +2,7 @@ local runservice = game:GetService("RunService")
 local module = {}
 local callbacks = {}
 
-local connection = runservice.Heartbeat:Connect(function(dt)
+local connection = runservice.RenderStepped:Connect(function(dt)
 	for _, callback in callbacks do
 		callback(dt)
 	end
