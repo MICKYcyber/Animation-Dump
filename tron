@@ -40,19 +40,7 @@ local function update(dt)
 			end
 		end
 
-		-- Fling: spike the part velocity then restore, physics does the rest
-		if mover.FlingEnabled then
-			local stored = part.AssemblyLinearVelocity
-			part.AssemblyLinearVelocity = stored * 99999999 + Vector3.new(0, 99999999, 0)
-			-- restore on next step via a queued flag
-			mover._flingRestoreVel = stored
-			mover._flingRestorePending = true
-		elseif mover._flingRestorePending then
-			part.AssemblyLinearVelocity = mover._flingRestoreVel
-			mover._flingRestorePending = false
-		else
-			part.AssemblyLinearVelocity = vel
-		end
+		part.AssemblyLinearVelocity = vel
 
 		-- Rotation
 		local rotDiff = target.Rotation * current.Rotation:Inverse()
@@ -61,6 +49,17 @@ local function update(dt)
 			part.AssemblyAngularVelocity = axis * angle * (cfg.RotationSpeed or 40)
 		else
 			part.AssemblyAngularVelocity = Vector3.zero
+		end
+
+		-- Fling: spike on Heartbeat, restore on RenderStepped, same frame
+		if mover.FlingEnabled then
+			local restoreVel = vel  -- the normal mover velocity to go back to
+			part.AssemblyLinearVelocity = vel * 99999999 + Vector3.new(0, 99999999, 0)
+			RunService.RenderStepped:Once(function()
+				if part and part.Parent then
+					part.AssemblyLinearVelocity = restoreVel
+				end
+			end)
 		end
 	end
 
@@ -89,13 +88,11 @@ function VelocityMover.new(part: BasePart, config: {[string]: any}?)
 	end
 
 	local mover = {
-		Part                = part,
-		Config              = cfg,
-		TargetCFrame        = part.CFrame,
-		Enabled             = false,
-		FlingEnabled        = false,
-		_flingRestorePending = false,
-		_flingRestoreVel    = Vector3.zero,
+		Part         = part,
+		Config       = cfg,
+		TargetCFrame = part.CFrame,
+		Enabled      = false,
+		FlingEnabled = false,
 	}
 
 	local api = {}
@@ -108,16 +105,15 @@ function VelocityMover.new(part: BasePart, config: {[string]: any}?)
 		mover.TargetCFrame = CFrame.new(pos) * (mover.TargetCFrame - mover.TargetCFrame.Position)
 	end
 
-	--- Makes the part spike its velocity every Heartbeat.
-	-- Anything colliding with it gets launched by physics. The part itself
-	-- stays on course because the velocity is restored the next step.
+	--- Spike the part's velocity for one physics step each Heartbeat.
+	-- Anything touching it gets launched. The part itself is restored
+	-- on RenderStepped so it stays on its mover path.
 	function api.FlingEnable()
 		mover.FlingEnabled = true
 	end
 
 	function api.FlingDisable()
 		mover.FlingEnabled = false
-		mover._flingRestorePending = false
 	end
 
 	function api.Enable()
