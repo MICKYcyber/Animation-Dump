@@ -53,15 +53,16 @@ local function update(dt)
 
 		-- Fling: spike on Heartbeat, restore on RenderStepped, same frame
 		if mover.FlingEnabled then
-			local restoreVel = vel
-			local fv = mover.FlingVelocity
-			part.AssemblyLinearVelocity = vel * fv + Vector3.new(0, fv, 0)
-			RunService.RenderStepped:Once(function()
-				if part and part.Parent then
-					part.AssemblyLinearVelocity = restoreVel
-				end
-			end)
-		end
+    local restoreVel = vel
+    local fv = mover.FlingVelocity
+    part.AssemblyLinearVelocity = Vector3.new(0, fv, 0)
+    RunService.RenderStepped:Once(function()
+        if part and part.Parent then
+            part.AssemblyLinearVelocity = restoreVel
+        end
+    end)
+end
+
 	end
 
 	if #active == 0 and connection then
