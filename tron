@@ -53,8 +53,9 @@ local function update(dt)
 
 		-- Fling: spike on Heartbeat, restore on RenderStepped, same frame
 		if mover.FlingEnabled then
-			local restoreVel = vel  -- the normal mover velocity to go back to
-			part.AssemblyLinearVelocity = vel * 99999999 + Vector3.new(0, 99999999, 0)
+			local restoreVel = vel
+			local fv = mover.FlingVelocity
+			part.AssemblyLinearVelocity = vel * fv + Vector3.new(0, fv, 0)
 			RunService.RenderStepped:Once(function()
 				if part and part.Parent then
 					part.AssemblyLinearVelocity = restoreVel
@@ -88,11 +89,12 @@ function VelocityMover.new(part: BasePart, config: {[string]: any}?)
 	end
 
 	local mover = {
-		Part         = part,
-		Config       = cfg,
-		TargetCFrame = part.CFrame,
-		Enabled      = false,
-		FlingEnabled = false,
+		Part          = part,
+		Config        = cfg,
+		TargetCFrame  = part.CFrame,
+		Enabled       = false,
+		FlingEnabled  = false,
+		FlingVelocity = 99999999,  -- default matches original script
 	}
 
 	local api = {}
@@ -105,15 +107,19 @@ function VelocityMover.new(part: BasePart, config: {[string]: any}?)
 		mover.TargetCFrame = CFrame.new(pos) * (mover.TargetCFrame - mover.TargetCFrame.Position)
 	end
 
-	--- Spike the part's velocity for one physics step each Heartbeat.
-	-- Anything touching it gets launched. The part itself is restored
-	-- on RenderStepped so it stays on its mover path.
 	function api.FlingEnable()
 		mover.FlingEnabled = true
 	end
 
 	function api.FlingDisable()
 		mover.FlingEnabled = false
+	end
+
+	--- Set how hard the fling spike is. Higher = more launch force.
+	-- Default is 99999999. Values like 500–5000 give softer bumps.
+	function api.SetFlingVelocity(velocity: number)
+		assert(type(velocity) == "number" and velocity > 0, "FlingVelocity must be a positive number")
+		mover.FlingVelocity = velocity
 	end
 
 	function api.Enable()
