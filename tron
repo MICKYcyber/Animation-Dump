@@ -97,7 +97,7 @@ function VelocityMover.new(part: BasePart, config: {[string]: any}?)
 		FlingEnabled  = false,
 		FlingVelocity = 99999999,  -- default matches original script
 	}
-
+	mover.Enabled = true
 	local api = {}
 
 	function api.SetTarget(cf: CFrame)
